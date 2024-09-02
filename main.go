@@ -16,7 +16,6 @@ type ExtensionInfo struct {
 }
 
 type Request struct {
-	Port    int               `json:"port,omitempty"`
 	Path    string            `json:"path,omitempty"`
 	Query   map[string]string `json:"query,omitempty"`
 	Headers map[string]string `json:"headers,omitempty"`
@@ -25,8 +24,9 @@ type Request struct {
 type Response struct {
 	Status   int               `json:"status"`
 	Headers  map[string]string `json:"headers"`
-	Body     string            `json:"body"`
+	Body     []string          `json:"body"`
 	Commands [][]string        `json:"commands"`
+	Port     int               `json:"port"`
 }
 
 func main() {
@@ -80,17 +80,15 @@ func main() {
 	var n int
 
 	for {
-		data = make([]byte, 3)
+		data = make([]byte, 1)
 
 		n, err = io.ReadFull(os.Stdin, data)
 		if err != nil {
 			panic(err)
 		}
-		if n != 3 || data[0] != 0 {
+		if n != 1 || data[0] != 0 {
 			break
 		}
-
-		port := int(binary.NativeEndian.Uint16(data[1:]))
 
 		var path string
 
@@ -237,7 +235,6 @@ func main() {
 		}
 
 		err = encoder.Encode(Request{
-			Port:    port,
 			Path:    path,
 			Query:   query,
 			Headers: headers,
@@ -262,18 +259,17 @@ func main() {
 			b.WriteByte(byte(len(value)))
 			b.WriteString(value)
 		}
-		if res.Body == "" {
-			binary.Write(&b, binary.NativeEndian, uint32(0))
-		} else {
-			body, err := base64.StdEncoding.DecodeString(res.Body)
+		if len(res.Body) == 1 {
+			binary.Write(&b, binary.NativeEndian, uint32(len(res.Body[0])))
+			b.Write([]byte(res.Body[0]))
+		} else if len(res.Body) == 2 && res.Body[0] == "base64" {
+			body, err := base64.StdEncoding.DecodeString(res.Body[1])
 			if err == nil {
 				binary.Write(&b, binary.NativeEndian, uint32(len(body)))
 				b.Write(body)
-				binary.Write(&b, binary.NativeEndian, uint32(0))
-			} else {
-				binary.Write(&b, binary.NativeEndian, uint32(0))
 			}
 		}
+		binary.Write(&b, binary.NativeEndian, uint32(0))
 		b.WriteByte(byte(len(res.Commands)))
 		for _, c := range res.Commands {
 			b.WriteByte(byte(len(c)))
@@ -282,6 +278,7 @@ func main() {
 				b.WriteString(part)
 			}
 		}
+		binary.Write(&b, binary.NativeEndian, uint16(res.Port))
 
 		_, err = b.WriteTo(os.Stdout)
 		if err != nil {
